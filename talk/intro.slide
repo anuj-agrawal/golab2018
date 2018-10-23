@@ -1,0 +1,171 @@
+Performance Evaluation in Go
+23 Oct 2018
+
+Anuj Agrawal
+
+* What will you learn
+- Profiling Go code
+- Making sense of profile data
+
+* What will you do
+- Pick a clumsy code
+- Profile it
+- Fix performance issues
+
+* Let's get started
+
+* Problem Statement
+Validate user ID of a user according to some pre-defined rules:
+
+    // It is usually recommended to only use usernames that begin with a lower
+    // case letter or an underscore, followed by lower case letters, digits,
+    // underscores, or dashes. They can end with a dollar sign. In regular
+    // expression terms: [a-z_][a-z0-9_-]*[$]?
+    //
+    // Usernames may only be up to 32 characters long.
+
+That sounds like something that can be done using a regular expression!
+
+* Problem Statement (Unit Tests)
+.code ../validater/main_test.go /^func Test/,/^}/
+
+* Problem Statement (Regex)
+Validate user ID of a user according to some pre-defined rules:
+
+    // It is usually recommended to only use usernames that begin with a lower
+    // case letter or an underscore, followed by lower case letters, digits,
+    // underscores, or dashes. They can end with a dollar sign. In regular
+    // expression terms: [a-z_][a-z0-9_-]*[$]?
+    //
+    // Usernames may only be up to 32 characters long.
+
+That sounds like something that can be done using a regular expression!
+
+    `^[a-z_]([a-z0-9._-]{0,31}|[a-z0-9._-]{0,30}\$)$`
+
+* First Attempt
+.code ../validater/main.go /^func valid/,/^}/
+.play ../validater/main.go /^func main/,/^}/
+
+* First Attempt - How did we do?
+.code ../validater/main_test.go /^func Bench/,/^}/
+
+    $ go test -run=^$ -bench=.
+    BenchmarkValidUserName-8   	   30000	     49448 ns/op
+    PASS
+    ok  	github.com/anuj-agrawal/golab2018/validater	1.986s
+    AnujAgrawal:validater anuj.agrawal$
+
+Can we do better?
+
+Let us profile to see what we can improve upon
+
+* CPU Profiling
+- Stop 100 times every second
+- Record sample of current stacktrace
+- Compile profiling data to be interpreted by pprof tool
+
+* Creating CPU profile
+
+    $ ls
+    main.go		main_test.go
+    $
+
+Generating Profile:
+
+    $ go test -run=^$ -bench=. -cpuprofile=cpu.prof
+    BenchmarkValidUserName-8   	   30000	     47950 ns/op
+    PASS
+    ok  	github.com/anuj-agrawal/golab2018/validater	1.950s
+    $
+
+Notice the new files generated:
+
+    $ ls
+    cpu.prof	main.go		main_test.go	validater.test
+    $
+
+* Interpreting CPU profile data
+
+    $ go tool pprof validater.test cpu.prof
+    Entering interactive mode (type "help" for commands)
+    (pprof) top
+    2.37s of 2.43s total (97.53%)
+    Dropped 18 nodes (cum <= 0.01s)
+    Showing top 10 nodes out of 88 (cum >= 0.03s)
+          flat  flat%   sum%        cum   cum%
+         2.10s 86.42% 86.42%      2.10s 86.42%  nanotime
+         0.10s  4.12% 90.53%      0.10s  4.12%  runtime.usleep
+         0.04s  1.65% 92.18%      0.04s  1.65%  runtime.stkbucket
+         0.03s  1.23% 93.42%      0.03s  1.23%  runtime.mach_semaphore_wait
+         0.02s  0.82% 94.24%      0.02s  0.82%  runtime.duffcopy
+         0.02s  0.82% 95.06%      0.29s 11.93%  runtime.growslice
+         0.02s  0.82% 95.88%      0.02s  0.82%  runtime.mach_semaphore_signal
+         0.02s  0.82% 96.71%      0.02s  0.82%  runtime.memclrNoHeapPointers
+         0.01s  0.41% 97.12%      1.35s 55.56%  regexp.(*bitState).reset
+         0.01s  0.41% 97.53%      0.03s  1.23%  regexp/syntax.(*compiler).compile
+    (pprof)
+
+* Interpreting CPU profile data
+
+- flat: estimated time spent in the function
+- flat%: appeared at the top of so many stacktrace samples
+- sum%: running sum of flat%
+- cum: estimated cumulative time spent in the function
+- cum%: appeared in so many stacktrace samples
+
+    (pprof) top5
+    2.29s of 2.43s total (94.24%)
+    Dropped 18 nodes (cum <= 0.01s)
+    Showing top 5 nodes out of 88 (cum >= 0.02s)
+          flat  flat%   sum%        cum   cum%
+         2.10s 86.42% 86.42%      2.10s 86.42%  nanotime
+         0.10s  4.12% 90.53%      0.10s  4.12%  runtime.usleep
+         0.04s  1.65% 92.18%      0.04s  1.65%  runtime.stkbucket
+         0.03s  1.23% 93.42%      0.03s  1.23%  runtime.mach_semaphore_wait
+         0.02s  0.82% 94.24%      0.02s  0.82%  runtime.duffcopy
+    (pprof)
+
+* Interpreting CPU profile data
+
+    (pprof) top -cum
+    2.10s of 2.43s total (86.42%)
+    Dropped 18 nodes (cum <= 0.01s)
+    Showing top 10 nodes out of 88 (cum >= 1.39s)
+          flat  flat%   sum%        cum   cum%
+             0     0%     0%      2.33s 95.88%  runtime.goexit
+         2.10s 86.42% 86.42%      2.10s 86.42%  nanotime
+             0     0% 86.42%      2.10s 86.42%  runtime.nanotime
+             0     0% 86.42%      2.04s 83.95%  github.com/anuj-agrawal/golab2018/validater.BenchmarkValidUserName
+             0     0% 86.42%      2.04s 83.95%  github.com/anuj-agrawal/golab2018/validater.validUserName
+             0     0% 86.42%      2.04s 83.95%  testing.(*B).launch
+             0     0% 86.42%      2.04s 83.95%  testing.(*B).runN
+             0     0% 86.42%      1.97s 81.07%  runtime.mallocgc
+             0     0% 86.42%      1.60s 65.84%  runtime.gcStart
+             0     0% 86.42%      1.39s 57.20%  regexp.(*Regexp).MatchString
+    (pprof)
+
+Is this still hard to read?
+
+* Interpreting CPU profile data
+
+    (pprof) list validUserName
+    Total: 2.43s
+    ROUTINE ======================== github.com/anuj-agrawal/golab2018/validater.validUserName in /Users/anuj.agrawal/go/src/github.com/anuj-agrawal/golab2018/validater/main.go
+             0      2.04s (flat, cum) 83.95% of Total
+             .          .     15:// underscores, or dashes. They can end with a dollar sign. In regular
+             .          .     16:// expression terms: [a-z_][a-z0-9_-]*[$]?
+             .          .     17://
+             .          .     18:// Usernames may only be up to 32 characters long.
+             .          .     19:func validUserName(name string) bool {
+             .      2.04s     20:	return regexp.MustCompile(`^[a-z_]([a-z0-9._-]{0,31}|[a-z0-9._-]{0,30}\$)$`).MatchString(name)
+             .          .     21:}
+             .          .     22:
+             .          .     23:func main() {
+             .          .     24:	if len(os.Args) < 2 {
+             .          .     25:		fmt.Println("need at least one argument")
+    (pprof)
+
+You could also create a diagram
+
+* Let us get our hands dirty now
